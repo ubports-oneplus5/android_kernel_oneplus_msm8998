@@ -254,7 +254,7 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/x86/ -e s/x86_64/x86/ \
 # "make" in the configured kernel build directory always uses that.
 # Default value for CROSS_COMPILE is not to prefix executables
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
-ARCH		?= $(SUBARCH)
+override ARCH 	:= arm64
 CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
 
 # Architecture as present in compile.h
@@ -398,6 +398,14 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
 		   -std=gnu89 $(call cc-option,-fno-PIE)
+
+# Optimize build results for MSM8998 (Snapdragon 835)
+KBUILD_CFLAGS   += -mcpu=cortex-a73.cortex-a53+crc+crypto
+
+# Kryo 280 doesn't need 835769/843419 erratum fixes.
+# Some toolchains enable those fixes automatically, so opt-out.
+KBUILD_CFLAGS   += $(call cc-option, -mno-fix-cortex-a53-835769)
+KBUILD_CFLAGS   += $(call cc-option, -mno-fix-cortex-a53-843419)
 
 ifeq ($(TARGET_BOARD_TYPE),auto)
 KBUILD_CFLAGS    += -DCONFIG_PLATFORM_AUTO
