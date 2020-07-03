@@ -407,6 +407,12 @@ KBUILD_CFLAGS   += -mcpu=cortex-a73.cortex-a53+crc+crypto
 KBUILD_CFLAGS   += $(call cc-option, -mno-fix-cortex-a53-835769)
 KBUILD_CFLAGS   += $(call cc-option, -mno-fix-cortex-a53-843419)
 
+# Disable some warnings that break building this kernel on GCC 10.1
+KBUILD_CFLAGS   += -Wno-stringop-overflow -Wno-misleading-indentation -Wno-builtin-declaration-mismatch \
+                   -Wno-zero-length-bounds -Wno-bool-compare -Wno-duplicate-decl-specifier \
+                   -Wno-restrict -Wno-bool-operation -Wno-parentheses -Wno-array-bounds \
+                   -Wno-memset-elt-size
+
 ifeq ($(TARGET_BOARD_TYPE),auto)
 KBUILD_CFLAGS    += -DCONFIG_PLATFORM_AUTO
 endif
