@@ -19,6 +19,7 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
+#include <linux/rfkill.h>
 #include <linux/gpio.h>
 #include <linux/of_gpio.h>
 #include <linux/delay.h>
@@ -44,6 +45,7 @@ static const struct of_device_id bt_power_match_table[] = {
 
 static struct bluetooth_power_platform_data *bt_power_pdata;
 static struct platform_device *btpdev;
+static bool previous;
 static int pwr_state;
 struct class *bt_class;
 static int bt_major;
@@ -341,6 +343,25 @@ out:
 	return rc;
 }
 
+static int bluetooth_toggle_radio(void *data, bool blocked)
+{
+	int ret = 0;
+	int (*power_control)(int enable);
+
+	power_control =
+		((struct bluetooth_power_platform_data *)data)->bt_power_setup;
+
+	if (previous != blocked)
+		ret = (*power_control)(!blocked);
+	if (!ret)
+		previous = blocked;
+	return ret;
+}
+
+static const struct rfkill_ops bluetooth_power_rfkill_ops = {
+	.set_block = bluetooth_toggle_radio,
+};
+
 #if defined(CONFIG_CNSS) && defined(CONFIG_CLD_LL_CORE)
 static ssize_t enable_extldo(struct device *dev, struct device_attribute *attr,
 			char *buf)
@@ -367,6 +388,54 @@ static ssize_t enable_extldo(struct device *dev, struct device_attribute *attr,
 #endif
 
 static DEVICE_ATTR(extldo, S_IRUGO, enable_extldo, NULL);
+
+static int bluetooth_power_rfkill_probe(struct platform_device *pdev)
+{
+	struct rfkill *rfkill;
+	int ret;
+
+	rfkill = rfkill_alloc("bt_power", &pdev->dev, RFKILL_TYPE_BLUETOOTH,
+			      &bluetooth_power_rfkill_ops,
+			      pdev->dev.platform_data);
+
+	if (!rfkill) {
+		dev_err(&pdev->dev, "rfkill allocate failed\n");
+		return -ENOMEM;
+	}
+
+	/* add file into rfkill0 to handle LDO27 */
+	ret = device_create_file(&pdev->dev, &dev_attr_extldo);
+	if (ret < 0)
+		BT_PWR_ERR("device create file error!");
+
+	/* force Bluetooth off during init to allow for user control */
+	rfkill_init_sw_state(rfkill, 1);
+	previous = 1;
+
+	ret = rfkill_register(rfkill);
+	if (ret) {
+		dev_err(&pdev->dev, "rfkill register failed=%d\n", ret);
+		rfkill_destroy(rfkill);
+		return ret;
+	}
+
+	platform_set_drvdata(pdev, rfkill);
+
+	return 0;
+}
+
+static void bluetooth_power_rfkill_remove(struct platform_device *pdev)
+{
+	struct rfkill *rfkill;
+
+	dev_dbg(&pdev->dev, "%s\n", __func__);
+
+	rfkill = platform_get_drvdata(pdev);
+	if (rfkill)
+		rfkill_unregister(rfkill);
+	rfkill_destroy(rfkill);
+	platform_set_drvdata(pdev, NULL);
+}
 
 #define MAX_PROP_SIZE 32
 static int bt_dt_parse_vreg_info(struct device *dev,
@@ -574,8 +643,10 @@ static int bt_power_probe(struct platform_device *pdev)
 		goto free_pdata;
 	}
 
+	if (bluetooth_power_rfkill_probe(pdev) < 0)
+		goto free_pdata;
+
 	btpdev = pdev;
-	bluetooth_power(true);
 
 	return 0;
 
@@ -587,6 +658,8 @@ free_pdata:
 static int bt_power_remove(struct platform_device *pdev)
 {
 	dev_dbg(&pdev->dev, "%s\n", __func__);
+
+	bluetooth_power_rfkill_remove(pdev);
 
 	if (bt_power_pdata->bt_chip_pwd->reg)
 		regulator_put(bt_power_pdata->bt_chip_pwd->reg);
